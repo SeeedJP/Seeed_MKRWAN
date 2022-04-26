@@ -206,14 +206,14 @@ const T& Max(const T& a, const T& b)
 #endif
 
 #define LORA_NL "\n"
-static const char LORA_OK[] = "+OK\r\n";
-static const char LORA_ERROR[] = "+ERROR\r\n";
-static const char LORA_ERROR_PARAM[] = "+PARAM_ERROR\r\n";
-static const char LORA_ERROR_BUSY[] = "+ERR_BUSY\r\n";
-static const char LORA_ERROR_OVERFLOW[] = "+ERR_PARAM_OVERFLOW\r\n";
-static const char LORA_ERROR_NO_NETWORK[] = "+ERR_NO_NETWORK\r\n";
-static const char LORA_ERROR_RX[] = "+ERR_RX\r\n";
-static const char LORA_ERROR_UNKNOWN[] = "+ERR_UNKNOWN\r\n";
+static const char LORA_OK[] = "OK\r\n";
+static const char LORA_ERROR[] = "AT_ERROR\r\n";
+static const char LORA_ERROR_PARAM[] = "AT_PARAM_ERROR\r\n";
+static const char LORA_ERROR_BUSY[] = "AT_BUSY_ERROR\r\n";
+static const char LORA_ERROR_OVERFLOW[] = "AT_TEST_PARAM_OVERFLOW\r\n";
+static const char LORA_ERROR_NO_NETWORK[] = "AT_NO_NETWORK_JOINED\r\n";
+static const char LORA_ERROR_RX[] = "AT_RX_ERROR\r\n";
+static const char LORA_ERROR_UNKNOWN[] = "error unknown\r\n";
 
 typedef enum {
     AS923 = 0,
@@ -262,9 +262,6 @@ struct fw_version_LoRa_s {
   String        mac_version;
 };
 
-IPAddress     app_addr;
-IPAddress     mac_addr;
-
 class LoRaModem : public Stream
 {
 
@@ -294,14 +291,12 @@ public:
   virtual int joinOTAA(const char *appEui, const char *appKey, const char *devEui = NULL) {
     YIELD();
     rx.clear();
-    changeMode(OTAA);
     set(APP_EUI, appEui);
     set(APP_KEY, appKey);
     if (devEui != NULL) {
         set(DEV_EUI, devEui);
     }
-    network_joined = join();
-    return (getJoinStatus() == 1);
+    return join(1);
   }
 
   virtual int joinOTAA(String appEui, String appKey) {
@@ -323,7 +318,7 @@ public:
     set(FNWKS_KEY, nwkSKey);
     set(SNWKS_KEY, nwkSKey);
     set(APPS_KEY, appSKey);
-    network_joined = join();
+    network_joined = join(0);
     return (getJoinStatus() == 1);
   }
 
@@ -523,26 +518,24 @@ public:
   }
 
   IPAddress version() {
-
-    // TODO: split firmware version in actual versions
-    String        app_version_str;
-    String        mac_version_str;
-    String        app_num_str;
-    String        mac_num_str;
-
     sendAT(GF("+VER=?"));   
-    if (waitResponse(fw_version) == 1) {
-        app_version_str=fw_version.substring(0,fw_version.indexOf('\r'));
-        mac_version_str=fw_version.substring(fw_version.indexOf('\n')+1, fw_version.lastIndexOf('\r', fw_version.indexOf("OK"))); 
+    if (waitResponse(fw_version) != 1) {
+      return IPAddress();
     }
-    app_num_str=app_version_str.substring(app_version_str.indexOf('=')+2, app_version_str.lastIndexOf('\r'));
-    mac_num_str=mac_version_str.substring(mac_version_str.indexOf('=')+2, mac_version_str.lastIndexOf('\r'));
 
-    if (app_addr.fromString(app_num_str)){
-      DBG("App num: ", app_addr);
-    }
-    if (mac_addr.fromString(mac_num_str)){
-      DBG("Mac num: ", mac_addr);
+    // fw_version is:
+    //   APP_VERSION:        V2.1.0.1
+    //   MW_LORAWAN_VERSION: V2.3.0
+    //   MW_RADIO_VERSION:   V1.1.0
+
+    const String app_version_str = fw_version.substring(0, fw_version.indexOf('\r'));
+    String app_num_str = app_version_str.substring(app_version_str.indexOf(':') + 1);
+    app_num_str.trim();
+    if (app_num_str.length() >=1 && app_num_str[0] == 'V') app_num_str = app_num_str.substring(1);
+
+    IPAddress app_addr;
+    if (!app_addr.fromString(app_num_str)) {
+      return IPAddress();
     }
 
     return app_addr;
@@ -693,9 +686,9 @@ private:
     return true;
   }
 
-  bool join() {
-    sendAT(GF("+JOIN"));
-    if (waitResponse(60000L, "JOINED") != 1) {
+  bool join(int mode) {
+    sendAT(GF("+JOIN="), mode);
+    if (waitResponse(60000L, "+EVT2:JOINED\r\n") != 1) {
       return false;
     }
     return true;
@@ -727,6 +720,7 @@ private:
             break;
         case APP_KEY:
             sendAT(GF("+APPKEY="), real_val);
+            sendAT(GF("+NWKKEY="), real_val);
             break;
         case DEV_EUI:
             sendAT(GF("+DEUI="), real_val);
@@ -787,15 +781,13 @@ private:
       msg_buf += String(buff[i], HEX);
     }
 
-    setCFM(confirmed);
-
-    sendAT(GF("+SENDB="), portToJoin, ":", msg_buf);
+    sendAT(GF("+SEND="), portToJoin, ":", 1, ":", msg_buf);
 
     int8_t rc = waitResponse( GFP(LORA_OK), GFP(LORA_ERROR), GFP(LORA_ERROR_PARAM), GFP(LORA_ERROR_BUSY), GFP(LORA_ERROR_OVERFLOW), GFP(LORA_ERROR_NO_NETWORK), GFP(LORA_ERROR_RX), GFP(LORA_ERROR_UNKNOWN) );
 
     if (confirmed && rc == 1) {
       // need both OK and shitty confirmation string
-      const char* confirmation = "confirmed message transmission";
+      const char* confirmation = "+EVT2:SEND_CONFIRMED\r\n";
       rc = waitResponse(5000, GFP(confirmation));
     }
 

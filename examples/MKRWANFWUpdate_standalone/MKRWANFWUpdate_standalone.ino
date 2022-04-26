@@ -284,7 +284,7 @@ void loop() {
     Serial.println("Flashing ok :)");
     SerialLoRa.end();
     LoRaModem* modem = new LoRaModem();
-    modem->begin(EU868);
+    modem->begin(AS923);
     Serial.println(modem->version());
   }
   while (1);
