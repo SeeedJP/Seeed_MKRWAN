@@ -560,7 +560,7 @@ public:
   }
 
   void poll() {
-    if (millis() - lastPollTime < pollInterval) return;
+    if (pollInterval == 0 || millis() - lastPollTime < pollInterval) return;
     lastPollTime = millis();
     // simply trigger a fake write
     uint8_t dummy = 0;
